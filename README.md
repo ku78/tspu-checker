@@ -19,7 +19,7 @@ sudo apt update
 sudo apt install -y hping3 nmap netcat-openbsd openssl dnsutils curl
 
 
-🚀 Быстрый старт
+##### 🚀 Быстрый старт
 bash
 # Скачать скрипт
 git clone https://github.com/ku78/tspu-checker.git
