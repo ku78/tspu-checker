@@ -14,10 +14,11 @@
 - Установленные утилиты: `ping`, `nc`, `curl`, `openssl`, `dig`, `hping3` (опционально), `nmap` (опционально)
 
 ### Установка зависимостей (Linux/WSL)
-
-```bash
+Bash
 sudo apt update
 sudo apt install -y hping3 nmap netcat-openbsd openssl dnsutils curl
+
+
 🚀 Быстрый старт
 bash
 # Скачать скрипт
@@ -71,3 +72,6 @@ text
   0) 🔧 Сменить IP сервера
   1) 🧪 Определить режим ТСПУ
   ...
+
+
+  
