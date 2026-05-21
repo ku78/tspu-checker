@@ -134,6 +134,13 @@ export TERM=xterm-256color
 ```bash
 sudo apt install dnsutils
 ```
+[🤝] Как внести вклад
+
+1. Форкните репозиторий
+2. Создайте ветку (git checkout -b feature/AmazingFeature)
+3. Закоммитьте изменения (git commit -m 'Add some AmazingFeature')
+4. Запушьте ветку (git push origin feature/AmazingFeature)
+5. Откройте Pull Request
 
 [📄] Лицензия
 MIT License — свободное использование, модификация и распространение.
