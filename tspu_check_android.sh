@@ -24,8 +24,8 @@ load_server_ip() {
         source "$CONFIG_FILE"
         echo -e "${GREEN}✓ Загружен сохранённый IP: $SERVER_IP${NC}"
     else
-        SERVER_IP="178.154.212.182"
-        echo -e "${YELLOW}⚠ Используется IP по умолчанию: 178.154.212.182${NC}"
+        SERVER_IP="192.168.1.1"
+        echo -e "${YELLOW}⚠ Используется IP по умолчанию: 192.168.1.1${NC}"
     fi
     echo ""
 }
@@ -77,7 +77,7 @@ detect_tspu_mode() {
     print_header
     echo -e "${YELLOW}[1] 🧪 Определение режима работы ТСПУ...${NC}\n"
     
-    BLOCKED_IP="173.194.222.113"
+    BLOCKED_IP="192.168.1.1"
     echo -e "${CYAN}🔬 Тестовый IP (Google): $BLOCKED_IP${NC}\n"
     
     echo -ne "  ICMP (ping) Google: "
