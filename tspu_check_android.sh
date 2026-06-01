@@ -41,7 +41,7 @@ pause() { echo -e "\n${YELLOW}Нажмите Enter для продолжения
 print_header() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}     ТСПУ Диагностический инструмент    ${NC}"
-    echo -e "${BLUE}              v4.5                      ${NC}"
+    echo -e "${BLUE}              v1.1                      ${NC}"
     echo -e "${BLUE}========================================${NC}\n"
     echo -e "${CYAN}🎯 Текущий целевой сервер: ${GREEN}$SERVER_IP${NC}\n"
 }
