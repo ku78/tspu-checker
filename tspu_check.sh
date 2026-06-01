@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ============================================
-# TSPU Диагностический инструмент v1.0
-# Исправлен ввод, сохранены эмодзи
+# TSPU Диагностический инструмент v4.5
+# Добавлены: NAT type detection, UDP speed test
 # ============================================
 
 # Цвета
@@ -24,8 +24,8 @@ load_server_ip() {
         source "$CONFIG_FILE"
         echo -e "${GREEN}✓ Загружен сохранённый IP: $SERVER_IP${NC}"
     else
-        SERVER_IP="192.168.1.1"
-        echo -e "${YELLOW}⚠ Используется IP по умолчанию: $SERVER_IP${NC}"
+        SERVER_IP="178.154.212.182"
+        echo -e "${YELLOW}⚠ Используется IP по умолчанию: 178.154.212.182${NC}"
     fi
     echo ""
 }
@@ -41,7 +41,7 @@ pause() { echo -e "\n${YELLOW}Нажмите Enter для продолжения
 print_header() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}     ТСПУ Диагностический инструмент    ${NC}"
-    echo -e "${BLUE}              v1.0                      ${NC}"
+    echo -e "${BLUE}              v4.5                      ${NC}"
     echo -e "${BLUE}========================================${NC}\n"
     echo -e "${CYAN}🎯 Текущий целевой сервер: ${GREEN}$SERVER_IP${NC}\n"
 }
@@ -381,11 +381,17 @@ check_my_ip() {
     echo -e "${YELLOW}[10] 🌍 Определение вашего IP...${NC}\n"
     
     local_ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -1)
-    echo -e "  Внутренний IP: ${GREEN}$local_ip${NC}"
+    if [ -n "$local_ip" ]; then
+        echo -e "  Внутренний IP: ${GREEN}$local_ip${NC}"
+    else
+        echo -e "  ${YELLOW}Внутренний IP: не определяется${NC}"
+    fi
     
-    external_ip=$(curl -s --max-time 3 -4 ifconfig.me 2>/dev/null)
+    external_ip=$(curl -s --max-time 5 -4 ifconfig.me 2>/dev/null)
     if [ -n "$external_ip" ]; then
         echo -e "  Внешний IP:    ${GREEN}$external_ip${NC}"
+    else
+        echo -e "  ${YELLOW}Внешний IP: не удалось определить${NC}"
     fi
     pause
 }
@@ -483,10 +489,162 @@ check_split_dns() {
     pause
 }
 
-# ========== ГЛАВНЫЙ ЦИКЛ (с эмодзи) ==========
-load_server_ip
+# 13. Тест UDP-связи между серверами
+udp_pair_test() {
+    clear_screen
+    print_header
+    echo -e "${YELLOW}[13] 🧪 Тест UDP-связи между серверами (Hysteria/QUIC)${NC}\n"
+    
+    echo -e "${CYAN}Этот тест проверяет, блокирует ли провайдер UDP-трафик.${NC}"
+    echo -e "Для работы нужно запустить скрипт на ДВУХ серверах одновременно.\n"
+    
+    echo -e "${GREEN}Выберите режим:${NC}"
+    echo -e "  ${BLUE}1${NC}) Режим СЕРВЕР (приёмник) — запустить на сервере, который ЖДЁТ пакеты"
+    echo -e "  ${BLUE}2${NC}) Режим КЛИЕНТ (отправитель) — запустить на сервере, который ОТПРАВЛЯЕТ"
+    echo
+    read -p "Ваш выбор: " mode
+    
+    if [ "$mode" = "1" ]; then
+        echo -e "\n${CYAN}=== РЕЖИМ СЕРВЕР (приёмник) ===${NC}\n"
+        read -p "Введите порт для прослушивания (по умолчанию 9999): " port_input
+        port=${port_input:-9999}
+        
+        echo -e "\n${YELLOW}⚠️ Убедитесь, что порт $port открыт в файрволе!${NC}"
+        echo -e "${YELLOW}⚠️ Если используется ufw: sudo ufw allow $port/udp${NC}"
+        echo -e "${YELLOW}⚠️ На некоторых VPS нужно открыть порт в панели управления (Security Group)${NC}\n"
+        
+        read -p "Нажмите Enter, чтобы начать прослушивание UDP порта $port..."
+        echo -e "${GREEN}✅ Слушаю UDP порт $port...${NC}"
+        echo -e "${CYAN}Ожидаю входящие пакеты. Для остановки нажмите Ctrl+C${NC}\n"
+        
+        nc -lu -p "$port" -v
+        echo -e "\n${YELLOW}⚠️ Прослушивание остановлено${NC}"
+        
+    elif [ "$mode" = "2" ]; then
+        echo -e "\n${CYAN}=== РЕЖИМ КЛИЕНТ (отправитель) ===${NC}\n"
+        read -p "Введите IP адрес целевого сервера (приёмника): " target_ip
+        if [ -z "$target_ip" ]; then
+            echo -e "${RED}❌ IP адрес обязателен!${NC}"
+            pause
+            return
+        fi
+        read -p "Введите порт целевого сервера (по умолчанию 9999): " port_input
+        port=${port_input:-9999}
+        read -p "Введите сообщение для отправки (по умолчанию 'TEST_UDP'): " message
+        message=${message:-TEST_UDP}
+        read -p "Количество пакетов (по умолчанию 1): " count_input
+        count=${count_input:-1}
+        
+        echo -e "\n${CYAN}Отправляю $count UDP пакет(ов) на $target_ip:$port${NC}\n"
+        success=0
+        for i in $(seq 1 $count); do
+            echo -n "  Пакет $i: "
+            if echo "${message}_${i}" | nc -u -w 3 "$target_ip" "$port" 2>/dev/null; then
+                echo -e "${GREEN}ОТПРАВЛЕН ✓${NC}"
+                success=$((success + 1))
+            else
+                echo -e "${RED}ОШИБКА (нет ответа или таймаут)${NC}"
+            fi
+            sleep 0.5
+        done
+        
+        echo -e "\n${CYAN}📊 Результат:${NC}"
+        if [ $success -eq $count ]; then
+            echo -e "  ${GREEN}✅ Все $success пакетов отправлены.${NC}"
+            echo -e "     Если на сервере-приёмнике они появились — UDP РАБОТАЕТ."
+        elif [ $success -gt 0 ]; then
+            echo -e "  ${YELLOW}⚠️ Отправлено только $success из $count пакетов. Возможны проблемы с сетью.${NC}"
+        else
+            echo -e "  ${RED}❌ Не удалось отправить ни одного пакета. Провайдер или хостинг блокирует UDP!${NC}"
+        fi
+    else
+        echo -e "${RED}❌ Неверный выбор${NC}"
+    fi
+    pause
+}
 
-while true; do
+# 14. Определение типа NAT (CGNAT / Full Cone / Symmetric)
+check_nat_type() {
+    clear_screen
+    print_header
+    echo -e "${YELLOW}[14] 🌐 Определение типа NAT (CGNAT/Full Cone/Symmetric)${NC}\n"
+    
+    echo -e "${CYAN}Этот тест помогает понять, почему не работают входящие соединения.${NC}\n"
+    
+    external_ip=$(curl -s --max-time 5 "https://ifconfig.me/ip" 2>/dev/null)
+    if [ -z "$external_ip" ]; then
+        echo -e "${RED}❌ Не удалось определить внешний IP${NC}"
+        pause
+        return
+    fi
+    
+    echo -e "  Внешний IP: ${GREEN}$external_ip${NC}"
+    
+    IFS='.' read -r a b c d <<< "$external_ip"
+    if [ "$a" -eq 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ]; then
+        echo -e "  ${RED}⚠️ Обнаружен CGNAT (адрес 100.64.0.0/10)${NC}"
+        echo -e "     → Прямые входящие соединения невозможны"
+        echo -e "     → Используйте туннелирование (VPN, reverse proxy)"
+    else
+        echo -e "  ${GREEN}✅ Публичный IP (не CGNAT)${NC}"
+    fi
+    
+    echo -e "\n${CYAN}🔌 Проверка входящих соединений:${NC}"
+    echo -e "  Запустите на этом же компьютере:"
+    echo -e "    ${YELLOW}nc -l -p 8888${NC}"
+    echo -e "  И попросите друга подключиться:"
+    echo -e "    ${YELLOW}nc -zv $external_ip 8888${NC}"
+    echo -e "\n  Если соединение не устанавливается — вы за CGNAT или порты закрыты оператором."
+    
+    pause
+}
+
+# 15. Тест скорости UDP канала
+test_udp_speed() {
+    clear_screen
+    print_header
+    echo -e "${YELLOW}[15] 📊 Тест скорости UDP канала${NC}\n"
+    
+    echo -e "${CYAN}ВНИМАНИЕ: Этот тест приблизительный. Требуется сервер-приёмник.${NC}\n"
+    
+    read -p "IP адрес сервера-приёмника: " target_ip
+    if [ -z "$target_ip" ]; then
+        echo -e "${RED}❌ IP адрес обязателен!${NC}"
+        pause
+        return
+    fi
+    read -p "Порт (по умолчанию 9999): " port_input
+    port=${port_input:-9999}
+    
+    echo -e "\n${YELLOW}Отправляю 10 пакетов по 1KB...${NC}\n"
+    
+    total_time=0
+    for i in $(seq 1 10); do
+        start=$(date +%s%N)
+        echo "TEST_SPEED_$i" | nc -u -w 2 "$target_ip" "$port" 2>/dev/null
+        end=$(date +%s%N)
+        elapsed=$((($end - $start) / 1000000))
+        echo -e "  Пакет $i: ${elapsed} мс"
+        total_time=$((total_time + elapsed))
+        sleep 0.5
+    done
+    
+    avg_time=$((total_time / 10))
+    echo -e "\n${CYAN}📊 Средняя задержка: ${avg_time} мс${NC}"
+    
+    if [ $avg_time -lt 50 ]; then
+        echo -e "  ${GREEN}✅ Отлично! UDP канал подходит для Hysteria/WireGuard${NC}"
+    elif [ $avg_time -lt 150 ]; then
+        echo -e "  ${YELLOW}⚠️ Нормально, но возможны проблемы при высокой нагрузке${NC}"
+    else
+        echo -e "  ${RED}❌ Высокая задержка! Hysteria/WireGuard будут работать медленно${NC}"
+    fi
+    
+    pause
+}
+
+# ========== ГЛАВНОЕ МЕНЮ (исправленное) ==========
+show_menu() {
     clear_screen
     print_header
     echo -e "${GREEN}Выберите действие:${NC}\n"
@@ -495,20 +653,28 @@ while true; do
     echo -e "  ${BLUE}2${NC}) 📡 Проверить активность ТСПУ (curl)"
     echo -e "  ${BLUE}3${NC}) 🔍 Проверить доступность портов (TCP)"
     echo -e "  ${BLUE}4${NC}) 🎭 Проверить SNI-фильтрацию (L7)"
-    echo -e "  ${BLUE}5${NC}) 📦 Проверить UDP-порты"
+    echo -e "  ${BLUE}5${NC}) 📦 Проверить UDP-порты (пояснения)"
     echo -e "  ${BLUE}6${NC}) 🌐 Проверить внешние DNS"
     echo -e "  ${BLUE}7${NC}) 🚀 Запустить веб-сервер на 443"
     echo -e "  ${BLUE}8${NC}) 🖥️  Полная проверка сервера"
     echo -e "  ${BLUE}9${NC}) 📊 Детальный анализ портов"
     echo -e "  ${BLUE}10${NC}) 🌍 Определить ваш IP"
-    echo -e "  ${BLUE}11${NC}) 🔬 Расширенная диагностика блокировок"
+    echo -e "  ${BLUE}11${NC}) 🔬 Расширенная диагностика блокировок (4 слоя)"
     echo -e "  ${BLUE}12${NC}) 🔍 Проверить Split DNS/утечку"
+    echo -e "  ${BLUE}13${NC}) 🧪 Тест UDP-связи между серверами (Hysteria/QUIC)"
+    echo -e "  ${BLUE}14${NC}) 🌐 Определение типа NAT (CGNAT)"
+    echo -e "  ${BLUE}15${NC}) 📊 Тест скорости UDP канала"
     echo -e "  ${BLUE}q${NC}) ❌ Выход"
     echo
+}
+
+# ========== ГЛАВНЫЙ ЦИКЛ (исправленный) ==========
+load_server_ip
+
+while true; do
+    show_menu
     read -p "Ваш выбор: " choice
-    
-    # Удаляем пробелы и переводим в нижний регистр
-    choice=$(echo "$choice" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+    echo ""  # пустая строка для красоты
     
     case "$choice" in
         0) configure_server_ip ;;
@@ -524,7 +690,10 @@ while true; do
         10) check_my_ip ;;
         11) rkn_block_check ;;
         12) check_split_dns ;;
-        q) 
+        13) udp_pair_test ;;
+        14) check_nat_type ;;
+        15) test_udp_speed ;;
+        q|Q) 
             clear_screen
             echo -e "${GREEN}До свидания!${NC}"
             exit 0
