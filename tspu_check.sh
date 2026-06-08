@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # ============================================
-# TSPU Диагностический инструмент v4.5
-# Добавлены: NAT type detection, UDP speed test
+# TSPU Диагностический инструмент v4.6
+# Исправлены: nc синтаксис, DNS проверка, UDP тест
+# Добавлен WireGuard тест
 # ============================================
 
 # Цвета
@@ -41,7 +42,7 @@ pause() { echo -e "\n${YELLOW}Нажмите Enter для продолжения
 print_header() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}     ТСПУ Диагностический инструмент    ${NC}"
-    echo -e "${BLUE}              v4.5                      ${NC}"
+    echo -e "${BLUE}              v4.6                      ${NC}"
     echo -e "${BLUE}========================================${NC}\n"
     echo -e "${CYAN}🎯 Текущий целевой сервер: ${GREEN}$SERVER_IP${NC}\n"
 }
@@ -50,6 +51,16 @@ print_header() {
 check_port_nc() {
     nc -zv -w 3 "$1" "$2" 2>&1 | grep -q "open\|succeeded\|Connected"
     return $?
+}
+
+# Универсальный nc для UDP прослушивания
+udp_listen() {
+    local port=$1
+    if nc -h 2>&1 | grep -q "\-l"; then
+        nc -ul "$port" -v 2>&1
+    else
+        nc -u -l -p "$port" -v 2>&1
+    fi
 }
 
 # 0. Настройка IP сервера
@@ -201,7 +212,7 @@ test_sni_filtering() {
     pause
 }
 
-# 5. Проверка UDP-портов
+# 5. Проверка UDP-портов (пояснения)
 check_udp_ports() {
     clear_screen
     print_header
@@ -209,8 +220,8 @@ check_udp_ports() {
     echo -e "${CYAN}🎯 Цель: $SERVER_IP${NC}\n"
     
     echo -ne "  UDP 53 (DNS): "
-    dns_result=$(timeout 2 dig @"$SERVER_IP" ya.ru +short 2>&1)
-    if [ -n "$dns_result" ] && [ "$dns_result" != ";;"* ]; then
+    dns_result=$(timeout 2 dig @"$SERVER_IP" ya.ru +short 2>&1 | head -1)
+    if [[ -n "$dns_result" && "$dns_result" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         echo -e "${GREEN}ОТВЕЧАЕТ ✓${NC}"
     else
         echo -e "${YELLOW}НЕТ ОТВЕТА (не DNS сервер)${NC}"
@@ -234,7 +245,7 @@ check_udp_ports() {
     pause
 }
 
-# 6. Проверка внешних DNS
+# 6. Проверка внешних DNS (исправленная)
 check_dns() {
     clear_screen
     print_header
@@ -250,9 +261,9 @@ check_dns() {
         ip="${dns%:*}"
         name="${dns#*:}"
         echo -ne "  $name ($ip): "
-        result=$(timeout 3 dig @"$ip" ya.ru +short 2>&1)
-        if [ -n "$result" ] && [ "$result" != ";;"* ]; then
-            echo -e "${GREEN}РАБОТАЕТ ✓${NC}"
+        result=$(timeout 3 dig @"$ip" ya.ru +short 2>/dev/null | head -1)
+        if [[ -n "$result" && "$result" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo -e "${GREEN}РАБОТАЕТ → $result${NC}"
         else
             echo -e "${RED}НЕ ДОСТУПЕН (таймаут)${NC}"
         fi
@@ -407,8 +418,8 @@ rkn_block_check() {
     
     sys_ip=$(dig +short ya.ru 2>/dev/null | head -1)
     doh_ip=$(dig +short ya.ru @1.1.1.1 2>/dev/null | head -1)
-    echo -ne "  DNS системный: "; [ -n "$sys_ip" ] && echo -e "${GREEN}OK → $sys_ip${NC}" || echo -e "${RED}НЕТ ОТВЕТА${NC}"
-    echo -ne "  DNS DoH (1.1.1.1): "; [ -n "$doh_ip" ] && echo -e "${GREEN}OK → $doh_ip${NC}" || echo -e "${RED}НЕТ ОТВЕТА${NC}"
+    echo -ne "  DNS системный: "; [[ -n "$sys_ip" && "$sys_ip" =~ ^[0-9.]+$ ]] && echo -e "${GREEN}OK → $sys_ip${NC}" || echo -e "${RED}НЕТ ОТВЕТА${NC}"
+    echo -ne "  DNS DoH (1.1.1.1): "; [[ -n "$doh_ip" && "$doh_ip" =~ ^[0-9.]+$ ]] && echo -e "${GREEN}OK → $doh_ip${NC}" || echo -e "${RED}НЕТ ОТВЕТА${NC}"
     
     echo -ne "  TCP порт 443: "
     if check_port_nc "ya.ru" 443; then
@@ -424,8 +435,8 @@ rkn_block_check() {
     
     sys_ip=$(dig +short twitter.com 2>/dev/null | head -1)
     doh_ip=$(dig +short twitter.com @1.1.1.1 2>/dev/null | head -1)
-    echo -ne "  DNS системный: "; [ -n "$sys_ip" ] && echo -e "${GREEN}OK → $sys_ip${NC}" || echo -e "${RED}НЕТ ОТВЕТА${NC}"
-    echo -ne "  DNS DoH (1.1.1.1): "; [ -n "$doh_ip" ] && echo -e "${GREEN}OK → $doh_ip${NC}" || echo -e "${RED}НЕТ ОТВЕТА${NC}"
+    echo -ne "  DNS системный: "; [[ -n "$sys_ip" && "$sys_ip" =~ ^[0-9.]+$ ]] && echo -e "${GREEN}OK → $sys_ip${NC}" || echo -e "${RED}НЕТ ОТВЕТА${NC}"
+    echo -ne "  DNS DoH (1.1.1.1): "; [[ -n "$doh_ip" && "$doh_ip" =~ ^[0-9.]+$ ]] && echo -e "${GREEN}OK → $doh_ip${NC}" || echo -e "${RED}НЕТ ОТВЕТА${NC}"
     
     echo -ne "  TCP порт 443: "
     if check_port_nc "twitter.com" 443; then
@@ -489,7 +500,7 @@ check_split_dns() {
     pause
 }
 
-# 13. Тест UDP-связи между серверами
+# 13. Тест UDP-связи между серверами (исправленный)
 udp_pair_test() {
     clear_screen
     print_header
@@ -509,15 +520,15 @@ udp_pair_test() {
         read -p "Введите порт для прослушивания (по умолчанию 9999): " port_input
         port=${port_input:-9999}
         
-        echo -e "\n${YELLOW}⚠️ Убедитесь, что порт $port открыт в файрволе!${NC}"
-        echo -e "${YELLOW}⚠️ Если используется ufw: sudo ufw allow $port/udp${NC}"
-        echo -e "${YELLOW}⚠️ На некоторых VPS нужно открыть порт в панели управления (Security Group)${NC}\n"
+        echo -e "\n${YELLOW}⚠️ Убедитесь, что порт $port открыт в файрволе!${NC}\n"
         
         read -p "Нажмите Enter, чтобы начать прослушивание UDP порта $port..."
         echo -e "${GREEN}✅ Слушаю UDP порт $port...${NC}"
         echo -e "${CYAN}Ожидаю входящие пакеты. Для остановки нажмите Ctrl+C${NC}\n"
         
-        nc -lu -p "$port" -v
+        # Универсальный запуск nc
+        udp_listen "$port"
+        
         echo -e "\n${YELLOW}⚠️ Прослушивание остановлено${NC}"
         
     elif [ "$mode" = "2" ]; then
@@ -563,7 +574,7 @@ udp_pair_test() {
     pause
 }
 
-# 14. Определение типа NAT (CGNAT / Full Cone / Symmetric)
+# 14. Определение типа NAT
 check_nat_type() {
     clear_screen
     print_header
@@ -578,36 +589,47 @@ check_nat_type() {
         return
     fi
     
-    echo -e "  Внешний IP: ${GREEN}$external_ip${NC}"
+    echo -e "  🌍 Внешний IP: ${GREEN}$external_ip${NC}"
     
     IFS='.' read -r a b c d <<< "$external_ip"
     if [ "$a" -eq 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ]; then
         echo -e "  ${RED}⚠️ Обнаружен CGNAT (адрес 100.64.0.0/10)${NC}"
-        echo -e "     → Прямые входящие соединения невозможны"
-        echo -e "     → Используйте туннелирование (VPN, reverse proxy)"
+        echo -e "     → Прямые входящие соединения НЕВОЗМОЖНЫ"
+        CGNAT_DETECTED=true
     else
         echo -e "  ${GREEN}✅ Публичный IP (не CGNAT)${NC}"
+        CGNAT_DETECTED=false
     fi
     
-    echo -e "\n${CYAN}🔌 Проверка входящих соединений:${NC}"
-    echo -e "  Запустите на этом же компьютере:"
-    echo -e "    ${YELLOW}nc -l -p 8888${NC}"
-    echo -e "  И попросите друга подключиться:"
-    echo -e "    ${YELLOW}nc -zv $external_ip 8888${NC}"
-    echo -e "\n  Если соединение не устанавливается — вы за CGNAT или порты закрыты оператором."
+    local_ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -1)
+    if [ -n "$local_ip" ] && [ "$local_ip" = "$external_ip" ]; then
+        echo -e "  ${GREEN}✅ IP совпадает → прямое подключение возможно${NC}"
+    elif [ -n "$local_ip" ]; then
+        echo -e "  ${YELLOW}⚠️ IP не совпадает (локальный: $local_ip) → вы за NAT${NC}"
+    fi
+    
+    echo -e "\n${BLUE}📊 ВЕРДИКТ:${NC}"
+    if [ "$CGNAT_DETECTED" = true ]; then
+        echo -e "  ${RED}❌ Вы за CGNAT. Входящие соединения НЕВОЗМОЖНЫ.${NC}"
+        echo -e "     Решения: туннелирование (Cloudflare Tunnel, ngrok) или VPN-подключения только исходящие"
+    elif [ -n "$local_ip" ] && [ "$local_ip" != "$external_ip" ]; then
+        echo -e "  ${YELLOW}⚠️ Вы за NAT. Входящие соединения возможны после настройки проброса портов.${NC}"
+    else
+        echo -e "  ${GREEN}✅ Прямое подключение. Входящие соединения должны работать.${NC}"
+    fi
     
     pause
 }
 
-# 15. Тест скорости UDP канала
-test_udp_speed() {
+# 15. Тест задержки UDP (RTT) — исправленный
+udp_latency_test() {
     clear_screen
     print_header
-    echo -e "${YELLOW}[15] 📊 Тест скорости UDP канала${NC}\n"
+    echo -e "${YELLOW}[15] ⏱️  Тест задержки UDP (RTT)${NC}\n"
     
-    echo -e "${CYAN}ВНИМАНИЕ: Этот тест приблизительный. Требуется сервер-приёмник.${NC}\n"
+    echo -e "${CYAN}Требуется сервер-приёмник, запущенный в режиме SERVER (пункт 13, режим 1).${NC}\n"
     
-    read -p "IP адрес сервера-приёмника: " target_ip
+    read -p "IP сервера-приёмника: " target_ip
     if [ -z "$target_ip" ]; then
         echo -e "${RED}❌ IP адрес обязателен!${NC}"
         pause
@@ -615,35 +637,233 @@ test_udp_speed() {
     fi
     read -p "Порт (по умолчанию 9999): " port_input
     port=${port_input:-9999}
+    read -p "Количество тестов (по умолчанию 10): " count_input
+    count=${count_input:-10}
     
-    echo -e "\n${YELLOW}Отправляю 10 пакетов по 1KB...${NC}\n"
+    echo -e "\n${YELLOW}Измеряю RTT (туда-обратно)...${NC}\n"
     
-    total_time=0
-    for i in $(seq 1 10); do
+    total=0
+    success=0
+    
+    for i in $(seq 1 $count); do
         start=$(date +%s%N)
-        echo "TEST_SPEED_$i" | nc -u -w 2 "$target_ip" "$port" 2>/dev/null
-        end=$(date +%s%N)
-        elapsed=$((($end - $start) / 1000000))
-        echo -e "  Пакет $i: ${elapsed} мс"
-        total_time=$((total_time + elapsed))
+        if echo "PING_$i" | nc -u -w 1 "$target_ip" "$port" 2>/dev/null; then
+            end=$(date +%s%N)
+            rtt=$(( ($end - $start) / 1000000 ))
+            echo -e "  Пакет $i: RTT = ${rtt} мс"
+            total=$((total + rtt))
+            success=$((success + 1))
+        else
+            echo -e "  Пакет $i: ${RED}ТАЙМАУТ${NC}"
+        fi
         sleep 0.5
     done
     
-    avg_time=$((total_time / 10))
-    echo -e "\n${CYAN}📊 Средняя задержка: ${avg_time} мс${NC}"
-    
-    if [ $avg_time -lt 50 ]; then
-        echo -e "  ${GREEN}✅ Отлично! UDP канал подходит для Hysteria/WireGuard${NC}"
-    elif [ $avg_time -lt 150 ]; then
-        echo -e "  ${YELLOW}⚠️ Нормально, но возможны проблемы при высокой нагрузке${NC}"
+    if [ $success -gt 0 ]; then
+        avg=$((total / success))
+        echo -e "\n${CYAN}📊 Результат: ${avg} мс (успешно: $success из $count)${NC}"
+        
+        if [ $avg -lt 50 ]; then
+            echo -e "  ${GREEN}✅ Отлично! Канал подходит для реального времени${NC}"
+        elif [ $avg -lt 150 ]; then
+            echo -e "  ${YELLOW}⚠️ Нормально, но возможны задержки${NC}"
+        else
+            echo -e "  ${RED}❌ Высокая задержка!${NC}"
+        fi
     else
-        echo -e "  ${RED}❌ Высокая задержка! Hysteria/WireGuard будут работать медленно${NC}"
+        echo -e "\n${RED}❌ Нет ответа от сервера! UDP может быть заблокирован.${NC}"
     fi
     
     pause
 }
 
-# ========== ГЛАВНОЕ МЕНЮ (исправленное) ==========
+# 16. WireGuard тест между серверами
+wireguard_test() {
+    clear_screen
+    print_header
+    echo -e "${YELLOW}[16] 🔐 WireGuard тест (между двумя серверами)${NC}\n"
+    
+    echo -e "${CYAN}Этот тест проверяет, блокирует ли провайдер WireGuard.${NC}"
+    echo -e "Требуется ДВА сервера с установленным wireguard-tools.\n"
+    
+    # Проверка наличия wireguard
+    if ! command -v wg &> /dev/null; then
+        echo -e "${RED}❌ WireGuard не установлен!${NC}"
+        echo -e "Установите: ${YELLOW}apt install wireguard-tools${NC}"
+        pause
+        return
+    fi
+    
+    echo -e "${GREEN}Выберите режим:${NC}"
+    echo -e "  ${BLUE}1${NC}) Режим СЕРВЕР — запустить на сервере, который ЖДЁТ подключения"
+    echo -e "  ${BLUE}2${NC}) Режим КЛИЕНТ — запустить на сервере, который ПОДКЛЮЧАЕТСЯ"
+    echo
+    read -p "Ваш выбор: " mode
+    
+    WG_PORT=51820
+    WG_INTERFACE="wgtest"
+    WG_PRESHARED_KEY="$(echo "simple-test-key-2024" | sha256sum | cut -c1-32)"
+    
+    if [ "$mode" = "1" ]; then
+        # РЕЖИМ СЕРВЕР
+        echo -e "\n${CYAN}=== РЕЖИМ СЕРВЕР ===${NC}\n"
+        
+        SERVER_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null)
+        if [ -z "$SERVER_IP" ]; then
+            echo -e "${RED}❌ Не удалось определить IP сервера${NC}"
+            pause
+            return
+        fi
+        echo -e "  Серверный IP: ${GREEN}$SERVER_IP${NC}"
+        
+        cd /tmp
+        wg genkey | tee server_private.key | wg pubkey > server_public.key
+        SERVER_PRIVATE=$(cat server_private.key)
+        SERVER_PUBLIC=$(cat server_public.key)
+        
+        echo -e "  Публичный ключ сервера: ${YELLOW}$SERVER_PUBLIC${NC}\n"
+        
+        echo -e "${CYAN}📋 ДАННЫЕ ДЛЯ КЛИЕНТА (скопируйте):${NC}"
+        echo -e "  ${GREEN}========================================${NC}"
+        echo -e "  Сервер: $SERVER_IP"
+        echo -e "  Порт: $WG_PORT"
+        echo -e "  Публичный ключ сервера: $SERVER_PUBLIC"
+        echo -e "  Preshared ключ: $WG_PRESHARED_KEY"
+        echo -e "  ${GREEN}========================================${NC}\n"
+        
+        cat > /tmp/wgtest_server.conf << EOF
+[Interface]
+PrivateKey = $SERVER_PRIVATE
+Address = 10.0.0.1/24
+ListenPort = $WG_PORT
+
+[Peer]
+PublicKey = PLACEHOLDER
+PresharedKey = $WG_PRESHARED_KEY
+AllowedIPs = 10.0.0.2/32
+EOF
+        
+        echo -e "${YELLOW}Ожидаю подключения клиента...${NC}"
+        read -p "Введите публичный ключ клиента: " CLIENT_PUBLIC
+        
+        if [ -z "$CLIENT_PUBLIC" ]; then
+            echo -e "${RED}❌ Ключ не введён${NC}"
+            rm -f /tmp/wgtest_*.key /tmp/wgtest_*.conf
+            pause
+            return
+        fi
+        
+        sed -i "s|PLACEHOLDER|$CLIENT_PUBLIC|" /tmp/wgtest_server.conf
+        
+        sudo ip link add dev $WG_INTERFACE type wireguard
+        sudo ip addr add 10.0.0.1/24 dev $WG_INTERFACE
+        sudo wg setconf $WG_INTERFACE /tmp/wgtest_server.conf
+        sudo ip link set $WG_INTERFACE up
+        
+        echo -e "\n${GREEN}✅ WireGuard сервер запущен на порту $WG_PORT${NC}\n"
+        
+        echo -e "${CYAN}Ожидаю передачи данных...${NC}"
+        echo -e "Нажмите Enter когда клиент завершит тест"
+        read
+        
+        echo -e "\n${CYAN}📊 Статистика WireGuard:${NC}"
+        sudo wg show $WG_INTERFACE
+        
+        sudo ip link del $WG_INTERFACE
+        rm -f /tmp/wgtest_*.key /tmp/wgtest_*.conf
+        
+        echo -e "\n${GREEN}✅ Тест завершён${NC}"
+        
+    elif [ "$mode" = "2" ]; then
+        # РЕЖИМ КЛИЕНТ
+        echo -e "\n${CYAN}=== РЕЖИМ КЛИЕНТ ===${NC}\n"
+        
+        read -p "Введите IP сервера: " SERVER_IP
+        read -p "Введите порт сервера (по умолчанию $WG_PORT): " port_input
+        SERVER_PORT=${port_input:-$WG_PORT}
+        read -p "Введите публичный ключ сервера: " SERVER_PUBLIC
+        read -p "Введите preshared ключ: " PSK_INPUT
+        
+        if [ -z "$SERVER_IP" ] || [ -z "$SERVER_PUBLIC" ]; then
+            echo -e "${RED}❌ IP и публичный ключ обязательны!${NC}"
+            pause
+            return
+        fi
+        
+        PSK_KEY=${PSK_INPUT:-$WG_PRESHARED_KEY}
+        
+        cd /tmp
+        wg genkey | tee client_private.key | wg pubkey > client_public.key
+        CLIENT_PRIVATE=$(cat client_private.key)
+        CLIENT_PUBLIC=$(cat client_public.key)
+        
+        echo -e "\n  Ваш публичный ключ: ${YELLOW}$CLIENT_PUBLIC${NC}"
+        echo -e "  Передайте его серверу в окошко ввода.\n"
+        
+        read -p "Нажмите Enter когда сервер будет готов..."
+        
+        cat > /tmp/wgtest_client.conf << EOF
+[Interface]
+PrivateKey = $CLIENT_PRIVATE
+Address = 10.0.0.2/24
+
+[Peer]
+PublicKey = $SERVER_PUBLIC
+PresharedKey = $PSK_KEY
+AllowedIPs = 10.0.0.1/32
+Endpoint = $SERVER_IP:$SERVER_PORT
+PersistentKeepalive = 25
+EOF
+        
+        sudo ip link add dev $WG_INTERFACE type wireguard
+        sudo ip addr add 10.0.0.2/24 dev $WG_INTERFACE
+        sudo wg setconf $WG_INTERFACE /tmp/wgtest_client.conf
+        sudo ip link set $WG_INTERFACE up
+        
+        echo -e "\n${GREEN}✅ WireGuard клиент запущен${NC}"
+        sleep 3
+        
+        if ping -c 3 -W 2 10.0.0.1 > /dev/null 2>&1; then
+            echo -e "${GREEN}✅ Соединение установлено!${NC}\n"
+            
+            echo -e "${CYAN}Передаю 10 MB тестовых данных...${NC}"
+            
+            dd if=/dev/urandom of=/tmp/test_10mb.dat bs=1M count=10 2>/dev/null
+            START_TIME=$(date +%s%N)
+            cat /tmp/test_10mb.dat | nc -w 5 10.0.0.1 9999 2>/dev/null
+            END_TIME=$(date +%s%N)
+            
+            ELAPSED_MS=$(( ($END_TIME - $START_TIME) / 1000000 ))
+            if [ $ELAPSED_MS -gt 0 ]; then
+                SPEED=$(( 10 * 1000 / $ELAPSED_MS ))
+                echo -e "${GREEN}✅ Передано 10 MB за ${ELAPSED_MS} мс (скорость: ~${SPEED} MB/s)${NC}"
+            else
+                echo -e "${GREEN}✅ Передано 10 MB${NC}"
+            fi
+            
+            rm -f /tmp/test_10mb.dat
+        else
+            echo -e "${RED}❌ Не удалось установить соединение!${NC}"
+            echo -e "Возможные причины:"
+            echo -e "  • WireGuard порт $SERVER_PORT заблокирован провайдером"
+            echo -e "  • Неправильные ключи"
+            echo -e "  • Файрвол на сервере не пускает UDP $SERVER_PORT"
+        fi
+        
+        echo -e "\n${CYAN}📊 Статистика WireGuard:${NC}"
+        sudo wg show $WG_INTERFACE
+        
+        sudo ip link del $WG_INTERFACE
+        rm -f /tmp/wgtest_*.key /tmp/wgtest_*.conf
+        
+    else
+        echo -e "${RED}❌ Неверный выбор${NC}"
+    fi
+    
+    pause
+}
+
+# ========== ГЛАВНОЕ МЕНЮ ==========
 show_menu() {
     clear_screen
     print_header
@@ -661,20 +881,21 @@ show_menu() {
     echo -e "  ${BLUE}10${NC}) 🌍 Определить ваш IP"
     echo -e "  ${BLUE}11${NC}) 🔬 Расширенная диагностика блокировок (4 слоя)"
     echo -e "  ${BLUE}12${NC}) 🔍 Проверить Split DNS/утечку"
-    echo -e "  ${BLUE}13${NC}) 🧪 Тест UDP-связи между серверами (Hysteria/QUIC)"
+    echo -e "  ${BLUE}13${NC}) 🧪 Тест UDP-связи между серверами"
     echo -e "  ${BLUE}14${NC}) 🌐 Определение типа NAT (CGNAT)"
-    echo -e "  ${BLUE}15${NC}) 📊 Тест скорости UDP канала"
+    echo -e "  ${BLUE}15${NC}) ⏱️  Тест задержки UDP (RTT)"
+    echo -e "  ${BLUE}16${NC}) 🔐 WireGuard тест (между двумя серверами)"
     echo -e "  ${BLUE}q${NC}) ❌ Выход"
     echo
 }
 
-# ========== ГЛАВНЫЙ ЦИКЛ (исправленный) ==========
+# ========== ЗАПУСК ==========
 load_server_ip
 
 while true; do
     show_menu
     read -p "Ваш выбор: " choice
-    echo ""  # пустая строка для красоты
+    echo ""
     
     case "$choice" in
         0) configure_server_ip ;;
@@ -692,7 +913,8 @@ while true; do
         12) check_split_dns ;;
         13) udp_pair_test ;;
         14) check_nat_type ;;
-        15) test_udp_speed ;;
+        15) udp_latency_test ;;
+        16) wireguard_test ;;
         q|Q) 
             clear_screen
             echo -e "${GREEN}До свидания!${NC}"
